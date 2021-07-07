@@ -22,7 +22,7 @@ warnings.filterwarnings(action='ignore')
 parser = argparse.ArgumentParser(description='Code to train the expert lip-sync discriminator')
 
 parser.add_argument('--checkpoint_dir', help='Save checkpoints to this directory', default='./checkpoints/', type=str)
-parser.add_argument('--checkpoint_path', help='Resume from this checkpoint', default='./checkpoints/train_checkpoint_mouth_resize.pth') 
+parser.add_argument('--checkpoint_path', help='Resume from this checkpoint', default='./checkpoints/train_checkpoint.pth') 
 parser.add_argument('--fps', help='image frame per second', default=25, type=int) 
 parser.add_argument('--batch_size', help='train data batch size', default=32, type=int) 
 parser.add_argument('--lr', help='optimizer learning rate', default=1e-4, type=float) 
@@ -83,6 +83,7 @@ class Dataset(object):
         self.mel_step_size = mel_step_size * mul
         self.detector = fd.face_detection('whole_face')
         self.time_delay = time_delay 
+        self.audio = audio.Audio()
 
     def get_frame_id(self, frame):
         return int(os.path.basename(frame).split('.')[0])
@@ -213,7 +214,7 @@ class Dataset(object):
                     if not os.path.isfile(wavpath):
                         print(f'audio not exists {wavpath}') 
                     wav = librosa.load(wavpath, self.config.sample_rate)[0]
-                    orig_mel = audio.melspectrogram(wav).T
+                    orig_mel = self.audio.melspectrogram(wav).T
                     mel = self.crop_audio_window(orig_mel.copy(), chosen) 
                     break
                 except:
@@ -375,7 +376,7 @@ def generate_target(joints, joints_vis, num_joints=68, heatmap_size=128, image_s
     return target, target_weight
 
 def train(device, model, keygenerator, train_data_loader, test_data_loader, optimizer,
-          checkpoint_dir=None, epoch=50):
+          checkpoint_path=None, epoch=50):
     global global_step, global_epoch, min_loss, train_loss 
     eval_loss = 0
     verbose = len(train_data_loader) // 2
@@ -432,15 +433,15 @@ def train(device, model, keygenerator, train_data_loader, test_data_loader, opti
         dump(txt, 'train.txt')  
         if test_data_loader is not None:
             with torch.no_grad():
-                eval_loss = eval_model(test_data_loader, device, model, keygenerator, checkpoint_dir)
+                eval_loss = eval_model(test_data_loader, device, model, keygenerator, checkpoint_path)
             if min_loss > eval_loss:
                 min_loss = eval_loss  
-                save_checkpoint(model, optimizer, global_step, checkpoint_dir, global_epoch, min_loss, state='eval')
+                save_checkpoint(model, optimizer, global_step, checkpoint_path, global_epoch, min_loss, state='eval')
  
         if train_loss > running_loss / (step + 1): 
             print(f'train loss : {running_loss / (step + 1)}')
 
-            save_checkpoint(model, optimizer, global_step, checkpoint_dir, global_epoch, running_loss / (step + 1), state='train')
+            save_checkpoint(model, optimizer, global_step, checkpoint_path, global_epoch, running_loss / (step + 1), state='train')
             img = np.array(pred.permute(0,2,3,1).cpu().detach() * 255.).astype(int)   
 
             for i in range(len(img)):
@@ -452,7 +453,7 @@ def train(device, model, keygenerator, train_data_loader, test_data_loader, opti
             train_loss = running_loss / (step + 1) 
         global_epoch += 1
  
-def eval_model(test_data_loader, device, model, keygenerator, checkpoint_dir=None):
+def eval_model(test_data_loader, device, model, keygenerator, checkpoint_path=None):
 
     losses = []  
     for (mel, mask, y, data) in test_data_loader:
@@ -501,8 +502,8 @@ def eval_model(test_data_loader, device, model, keygenerator, checkpoint_dir=Non
             
         return averaged_loss
  
-def save_checkpoint(model, optimizer, step, checkpoint_dir, epoch, loss, state):
-    checkpoint_path = os.path.join(checkpoint_dir, f"{state}_checkpoint.pth")
+def save_checkpoint(model, optimizer, step, checkpoint_path, epoch, loss, state):
+    # checkpoint_path = os.path.join(checkpoint_dir, f"{state}_checkpoint.pth")
     optimizer_state = optimizer.state_dict()
     torch.save({
         "state_dict": model.state_dict(),
@@ -595,5 +596,5 @@ if __name__ == "__main__":
             pass
     
     train(device, model, keygen, train_data_loader, test_data_loader, optimizer,
-          checkpoint_dir=args.checkpoint_dir, 
+          checkpoint_path=args.checkpoint_path, 
           epoch=args.epoch)
